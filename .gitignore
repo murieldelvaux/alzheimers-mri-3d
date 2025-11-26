@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Dados
+data/raw/
+data/processed/
+
+# Outros
+*.nii
+*.nii.gz
+runs/
+logs/
