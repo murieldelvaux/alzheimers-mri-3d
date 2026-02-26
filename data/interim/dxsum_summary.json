@@ -1,0 +1,13 @@
+{
+  "n_rows_in": 16071,
+  "n_rows_out": 16026,
+  "n_ptid": 3778,
+  "label_counts": {
+    "MCI": 6619,
+    "CN": 6394,
+    "DEM": 3013
+  },
+  "n_missing_dates": 71,
+  "n_dropped_missing_label": 45,
+  "n_dropped_dupes": 0
+}
