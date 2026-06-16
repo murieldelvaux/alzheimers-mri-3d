@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from src.data.dataloader_monai import make_loader
+from src.data_prep.dataloader_monai import make_loader
 
-MANIFEST = "repo/data/processed/manifest_pilot.csv"
+MANIFEST = "data/unified_metadata.csv"
 
 def main():
     for split in ["train", "val", "test"]:
