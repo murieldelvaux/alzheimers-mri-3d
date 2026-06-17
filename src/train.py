@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from pathlib import Path
 from torch.utils.data import DataLoader
 
 from src.datasets.mri_dataset import MRIDataset
@@ -32,6 +33,11 @@ def train(config_path: str) -> None:
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=cfg["training"]["learning_rate"])
 
+    checkpoints_dir = Path("checkpoints")
+    checkpoints_dir.mkdir(exist_ok=True)
+
+    best_loss = float("inf")
+
     for epoch in range(cfg["training"]["epochs"]):
         model.train()
         running_loss = 0.0
@@ -49,6 +55,31 @@ def train(config_path: str) -> None:
 
         epoch_loss = running_loss / len(train_loader.dataset) if len(train_loader.dataset) else 0.0
         print(f"Epoch {epoch+1}/{cfg['training']['epochs']} - loss: {epoch_loss:.4f}")
+
+        # Save checkpoint every epoch
+        torch.save(
+            {
+                "epoch": epoch + 1,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "loss": epoch_loss,
+            },
+            checkpoints_dir / f"checkpoint_epoch{epoch+1:03d}.pt",
+        )
+
+        # Save best model separately (used by inference.py)
+        if epoch_loss < best_loss:
+            best_loss = epoch_loss
+            torch.save(
+                {
+                    "epoch": epoch + 1,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "loss": best_loss,
+                },
+                checkpoints_dir / "best_model.pt",
+            )
+            print(f"  ✓ best model saved (loss={best_loss:.4f})")
 
 
 if __name__ == "__main__":
