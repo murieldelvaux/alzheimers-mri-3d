@@ -9,7 +9,8 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Dados
-data/
+data/adni/
+data/oasis/
 data/processed/
 
 # Outros
