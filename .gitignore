@@ -9,7 +9,7 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Dados
-data/raw/
+data/
 data/processed/
 
 # Outros
