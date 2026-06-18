@@ -1,16 +1,15 @@
 data:
+  unified_metadata: data/oasis/oasis_merged.csv
+  splits: data/oasis/splits.json
   adni_raw: data/adni/raw
-  adni_preprocessed: data/adni/preprocessed
   oasis_raw: data/oasis/raw
-  oasis_preprocessed: data/oasis/preprocessed
-  unified_metadata: data/unified_metadata.csv
 
 training:
   batch_size: 2
-  epochs: 10
-  learning_rate: 1e-4
-  num_workers: 4
-  device: cuda
+  epochs: 20
+  learning_rate: 0.0001
+  num_workers: 0
+  device: mps
 
 model:
   architecture: resnet3d
@@ -23,3 +22,8 @@ preprocessing:
   intensity_range: [0, 3000]
   normalized_range: [0.0, 1.0]
   spatial_size: [128, 128, 128]
+
+class_weights:
+  CN: 1.0
+  MCI: 8.0
+  DEM: 4.0

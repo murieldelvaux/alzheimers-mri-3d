@@ -10,7 +10,9 @@ __pycache__/
 
 # Dados
 data/adni/
-data/oasis/
+data/oasis/raw/clinical/
+data/oasis/raw/images/
+
 data/processed/
 
 # Outros
