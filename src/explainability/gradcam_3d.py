@@ -143,7 +143,7 @@ class GradCAM3D:
 
         # Normalise to [0, 1] and convert to numpy
         cam_np: np.ndarray = cam.squeeze().cpu().numpy()  # (D, H, W)
-        cam_min, cam_max = cam_np.min(), cam_np.max()
+        cam_min, cam_max = cam_np.min(), cam_np.max() #
         if cam_max - cam_min > 1e-8:
             cam_np = (cam_np - cam_min) / (cam_max - cam_min)
         else:
