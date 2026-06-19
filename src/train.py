@@ -30,7 +30,13 @@ def train(config_path: str) -> None:
         in_channels=cfg["model"]["input_channels"],
         num_classes=cfg["model"]["num_classes"],
     ).to(device)
-    criterion = nn.CrossEntropyLoss()
+
+    class_counts = torch.tensor([1005.0, 85.0, 285.0])  # CN=0, MCI=1, DEM(AD)=2
+    class_weights = 1.0 / class_counts
+    class_weights = class_weights / class_weights.sum()  # normaliza
+    class_weights = class_weights.to(device)
+
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = optim.Adam(model.parameters(), lr=cfg["training"]["learning_rate"])
 
     checkpoints_dir = Path("checkpoints")
@@ -77,7 +83,7 @@ def train(config_path: str) -> None:
                     "optimizer_state_dict": optimizer.state_dict(),
                     "loss": best_loss,
                 },
-                checkpoints_dir / "best_model.pt",
+                checkpoints_dir / "best_model.pth",
             )
             print(f"  ✓ best model saved (loss={best_loss:.4f})")
 
