@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.optim as optim
 from pathlib import Path
 from torch.utils.data import DataLoader
+from sklearn.metrics import classification_report
+import numpy as np
 
 from src.datasets.mri_dataset import MRIDataset
 from src.models.cnn_3d import SimpleResNet3D
@@ -16,25 +18,29 @@ def train(config_path: str) -> None:
     cfg = load_config(config_path)
     device = get_device(cfg["training"]["device"])
 
-    transform = build_preprocessing_pipeline(cfg, train=True)
-    train_ds = MRIDataset(cfg["data"]["unified_metadata"], split="train", transform=transform)
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=cfg["training"]["batch_size"],
-        shuffle=True,
-        num_workers=cfg["training"]["num_workers"],
-        pin_memory=False,
-    )
+    # ── Datasets ──────────────────────────────────────────────────────────
+    train_transform = build_preprocessing_pipeline(cfg, train=True)
+    val_transform   = build_preprocessing_pipeline(cfg, train=False)
 
+    train_ds = MRIDataset(cfg["data"]["unified_metadata"], split="train", transform=train_transform)
+    val_ds   = MRIDataset(cfg["data"]["unified_metadata"], split="val",   transform=val_transform)
+
+    train_loader = DataLoader(train_ds, batch_size=cfg["training"]["batch_size"],
+                              shuffle=True,  num_workers=cfg["training"]["num_workers"])
+    val_loader   = DataLoader(val_ds,   batch_size=cfg["training"]["batch_size"],
+                              shuffle=False, num_workers=cfg["training"]["num_workers"])
+
+    # ── Modelo ────────────────────────────────────────────────────────────
     model = SimpleResNet3D(
         in_channels=cfg["model"]["input_channels"],
         num_classes=cfg["model"]["num_classes"],
     ).to(device)
 
-    class_counts = torch.tensor([1005.0, 85.0, 285.0])  # CN=0, MCI=1, DEM(AD)=2
-    class_weights = 1.0 / class_counts
-    class_weights = class_weights / class_weights.sum()  # normaliza
+    # ── Pesos corretos: proporcionais à frequência inversa ────────────────
+    class_counts = torch.tensor([1005.0, 85.0, 285.0])  # CN, MCI, DEM
+    class_weights = class_counts.sum() / (len(class_counts) * class_counts)
     class_weights = class_weights.to(device)
+    print(f"Class weights: CN={class_weights[0]:.3f}  MCI={class_weights[1]:.3f}  DEM={class_weights[2]:.3f}")
 
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = optim.Adam(model.parameters(), lr=cfg["training"]["learning_rate"])
@@ -42,56 +48,62 @@ def train(config_path: str) -> None:
     checkpoints_dir = Path("checkpoints")
     checkpoints_dir.mkdir(exist_ok=True)
 
-    best_loss = float("inf")
+    best_val_loss = float("inf")
+    class_names = ["CN", "MCI", "DEM"]
 
     for epoch in range(cfg["training"]["epochs"]):
+
+        # ── Treino ────────────────────────────────────────────────────────
         model.train()
         running_loss = 0.0
         for batch in train_loader:
             images = batch["image"].to(device)
             labels = batch["label"].to(device)
-
             optimizer.zero_grad()
-            outputs = model(images)
-            loss = criterion(outputs, labels)
+            loss = criterion(model(images), labels)
             loss.backward()
             optimizer.step()
-
             running_loss += loss.item() * images.size(0)
 
-        epoch_loss = running_loss / len(train_loader.dataset) if len(train_loader.dataset) else 0.0
-        print(f"Epoch {epoch+1}/{cfg['training']['epochs']} - loss: {epoch_loss:.4f}")
+        train_loss = running_loss / len(train_ds)
 
-        # Save checkpoint every epoch
-        torch.save(
-            {
+        # ── Validação ─────────────────────────────────────────────────────
+        model.eval()
+        val_loss = 0.0
+        all_preds, all_labels = [], []
+
+        with torch.no_grad():
+            for batch in val_loader:
+                images = batch["image"].to(device)
+                labels = batch["label"].to(device)
+                outputs = model(images)
+                val_loss += criterion(outputs, labels).item() * images.size(0)
+                preds = outputs.argmax(dim=1)
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
+
+        val_loss /= len(val_ds)
+
+        print(f"\nEpoch {epoch+1}/{cfg['training']['epochs']}")
+        print(f"  Train loss: {train_loss:.4f}  |  Val loss: {val_loss:.4f}")
+        print(classification_report(all_labels, all_preds,
+                                    target_names=class_names, zero_division=0))
+
+        # ── Salva melhor modelo por val_loss ──────────────────────────────
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save({
                 "epoch": epoch + 1,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
-                "loss": epoch_loss,
-            },
-            checkpoints_dir / f"checkpoint_epoch{epoch+1:03d}.pt",
-        )
-
-        # Save best model separately (used by inference.py)
-        if epoch_loss < best_loss:
-            best_loss = epoch_loss
-            torch.save(
-                {
-                    "epoch": epoch + 1,
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "loss": best_loss,
-                },
-                checkpoints_dir / "best_model.pth",
-            )
-            print(f"  ✓ best model saved (loss={best_loss:.4f})")
+                "loss": val_loss,
+            }, checkpoints_dir / "best_model.pth")
+            print(f"  ✓ best model saved (val_loss={val_loss:.4f})")
 
 
 if __name__ == "__main__":
     import argparse
-
-    parser = argparse.ArgumentParser(description="Train a 3D CNN model.")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
     train(args.config)
