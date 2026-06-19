@@ -12,13 +12,13 @@ from src.datasets.mri_dataset import MRIDataset
 from src.models.cnn_3d import SimpleResNet3D
 from src.utils.helpers import load_config, get_device
 from src.data_prep.preprocess import build_preprocessing_pipeline
+from src.utils.focal_loss import FocalLoss
 
 
 def train(config_path: str) -> None:
     cfg = load_config(config_path)
     device = get_device(cfg["training"]["device"])
 
-    # ── Datasets ──────────────────────────────────────────────────────────
     train_transform = build_preprocessing_pipeline(cfg, train=True)
     val_transform   = build_preprocessing_pipeline(cfg, train=False)
 
@@ -26,24 +26,22 @@ def train(config_path: str) -> None:
     val_ds   = MRIDataset(cfg["data"]["unified_metadata"], split="val",   transform=val_transform)
 
     train_loader = DataLoader(train_ds, batch_size=cfg["training"]["batch_size"],
-                              shuffle=True,  num_workers=cfg["training"]["num_workers"])
-    val_loader   = DataLoader(val_ds,   batch_size=cfg["training"]["batch_size"],
+                              shuffle=True, num_workers=cfg["training"]["num_workers"])
+    val_loader   = DataLoader(val_ds, batch_size=cfg["training"]["batch_size"],
                               shuffle=False, num_workers=cfg["training"]["num_workers"])
 
-    # ── Modelo ────────────────────────────────────────────────────────────
     model = SimpleResNet3D(
         in_channels=cfg["model"]["input_channels"],
         num_classes=cfg["model"]["num_classes"],
     ).to(device)
 
-    # ── Pesos corretos: proporcionais à frequência inversa ────────────────
-    class_counts = torch.tensor([1005.0, 85.0, 285.0])  # CN, MCI, DEM
-    class_weights = class_counts.sum() / (len(class_counts) * class_counts)
-    class_weights = class_weights.to(device)
+    # Pesos suaves — não tão extremos quanto antes
+    class_weights = torch.tensor([1.0, 5.0, 3.0]).to(device)
     print(f"Class weights: CN={class_weights[0]:.3f}  MCI={class_weights[1]:.3f}  DEM={class_weights[2]:.3f}")
 
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
-    optimizer = optim.Adam(model.parameters(), lr=cfg["training"]["learning_rate"])
+    criterion = FocalLoss(weight=class_weights, gamma=2.0)
+    optimizer = optim.Adam(model.parameters(), lr=5e-5, weight_decay=1e-4)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=4, factor=0.5)
 
     checkpoints_dir = Path("checkpoints")
     checkpoints_dir.mkdir(exist_ok=True)
@@ -52,8 +50,6 @@ def train(config_path: str) -> None:
     class_names = ["CN", "MCI", "DEM"]
 
     for epoch in range(cfg["training"]["epochs"]):
-
-        # ── Treino ────────────────────────────────────────────────────────
         model.train()
         running_loss = 0.0
         for batch in train_loader:
@@ -67,7 +63,6 @@ def train(config_path: str) -> None:
 
         train_loss = running_loss / len(train_ds)
 
-        # ── Validação ─────────────────────────────────────────────────────
         model.eval()
         val_loss = 0.0
         all_preds, all_labels = [], []
@@ -75,21 +70,19 @@ def train(config_path: str) -> None:
         with torch.no_grad():
             for batch in val_loader:
                 images = batch["image"].to(device)
-                labels = batch["label"].to(device)
+                labels_b = batch["label"].to(device)
                 outputs = model(images)
-                val_loss += criterion(outputs, labels).item() * images.size(0)
-                preds = outputs.argmax(dim=1)
-                all_preds.extend(preds.cpu().numpy())
-                all_labels.extend(labels.cpu().numpy())
+                val_loss += criterion(outputs, labels_b).item() * images.size(0)
+                all_preds.extend(outputs.argmax(dim=1).cpu().numpy())
+                all_labels.extend(labels_b.cpu().numpy())
 
         val_loss /= len(val_ds)
+        scheduler.step(val_loss)
 
         print(f"\nEpoch {epoch+1}/{cfg['training']['epochs']}")
-        print(f"  Train loss: {train_loss:.4f}  |  Val loss: {val_loss:.4f}")
-        print(classification_report(all_labels, all_preds,
-                                    target_names=class_names, zero_division=0))
+        print(f"  Train loss: {train_loss:.4f}  |  Val loss: {val_loss:.4f}  |  LR: {optimizer.param_groups[0]['lr']:.2e}")
+        print(classification_report(all_labels, all_preds, target_names=class_names, zero_division=0))
 
-        # ── Salva melhor modelo por val_loss ──────────────────────────────
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save({
